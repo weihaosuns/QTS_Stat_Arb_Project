@@ -162,6 +162,47 @@ signaler = SpreadSignalModel()
 
 # NUMBER 96, 512, 608, 624 HMM MODEL IS NOT CONVERGING.
 
+WEIGHTS_DIR = "data/cache/weights"
+os.makedirs(WEIGHTS_DIR, exist_ok=True)
+
+# for date in tqdm(train_dates):
+#     weights_cache_file = os.path.join(WEIGHTS_DIR, f"{date.date()}.pkl")
+#     if os.path.exists(weights_cache_file):
+#         continue  # skip if done
+#
+#     try:
+#         signal_path = os.path.join(SIGNAL_DIR, f"{date.date()}.pkl")
+#         with open(signal_path, "rb") as f:
+#             signal_cache = pickle.load(f)
+#         spreads = signal_cache["spread"]
+#
+#         returns_dict = {}
+#
+#         for pair, df in spreads.items():
+#             df = df.copy()
+#             df = df.sort_index()
+#             df['return'] = df['spread'].pct_change()
+#             returns_dict[pair] = df['return']
+#
+#         spread_returns = pd.DataFrame(returns_dict).dropna()
+#         mu = spread_returns.mean()
+#         sigma = spread_returns.cov()
+#
+#         inv_Sigma = np.linalg.inv(sigma)
+#         raw_weights = inv_Sigma @ mu
+#         weights = raw_weights / np.sum(np.abs(raw_weights))
+#         optimal_weights = pd.Series(weights, index=spread_returns.columns)
+#
+#         with open(weights_cache_file, "wb") as f:
+#             pickle.dump({
+#                 "date": date,
+#                 "weights": optimal_weights,
+#             }, f)
+#
+#     except Exception as e:
+#         print(f"Failed on {date}: {e}")
+
+
 PNL_DIR = "data/cache/pnl"
 os.makedirs(PNL_DIR, exist_ok=True)
 price_df = pd.read_csv(DATA_PATH, index_col=0, parse_dates=True).sort_index()
@@ -186,9 +227,15 @@ for i in tqdm(range(len(train_dates) - 1)):
         with open(signal_path, "rb") as f:
             signal_cache = pickle.load(f)
         signals = signal_cache["signal"]
+        spreads = signal_cache["spread"]
+
+        weights_path = os.path.join(WEIGHTS_DIR, f"{date.date()}.pkl")
+        with open(weights_path, "rb") as f:
+            weights_cache = pickle.load(f)
+        optimal_weights = weights_cache["weights"]
 
         pnl_dict = {}
-        notional_per_pair = notional/2 /len(pairs)
+
         for pair in pairs:
             ticker_a, ticker_b, beta = pair[0], pair[1], pair[2]
             pair_name = f"{ticker_a}_{ticker_b}"
@@ -196,6 +243,7 @@ for i in tqdm(range(len(train_dates) - 1)):
             if pair_name not in signals:
                 continue
             signal = signals[pair_name]
+            weight = 1/len(pairs)
 
             if (ticker_a not in price_df.columns) or (ticker_b not in price_df.columns):
                 continue
@@ -219,7 +267,7 @@ for i in tqdm(range(len(train_dates) - 1)):
             spread_return = (spread_t1 - spread_t) / abs(spread_t)
 
             # max loss is the entire trade, max gain is unlimited.
-            pnl = np.clip(signal * spread_return * notional_per_pair, -notional_per_pair, np.inf)
+            pnl = np.clip(signal * spread_return , -1, np.inf) * weight
             pnl_dict[pair_name] = pnl
 
         with open(pnl_cache_file, "wb") as f:
@@ -260,4 +308,4 @@ pnl_df = pd.DataFrame(pnl_rows).sort_index()
 pnl_df = pnl_df.fillna(0)
 
 # Save for future use
-pnl_df.to_csv("data/full_pnl.csv")
+pnl_df.to_csv("data/full_pnl_equal.csv")
